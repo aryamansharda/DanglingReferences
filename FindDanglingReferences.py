@@ -36,9 +36,9 @@ def load_ib_outlets_from_storyboards():
 				view_controller_class_name = viewController.attrib["customClass"]
 
 				connections = viewController.findall('.//connections/*')
-				ib_outlets = [connection.attrib["property"] for connection in connections if connection.tag == "outlet"]
+				ib_outlets = [connection.attrib["property"] for connection in connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
 
-				storyboard_ib_outlet_map[view_controller_class_name] = ib_outlets
+				storyboard_ib_outlet_map[view_controller_class_name] = set(ib_outlets)
 			
 			# 	# TODO: See if there are any other types besides selector
 			# 	print("IBAction found: " + connection.attrib["selector"])
@@ -65,7 +65,7 @@ def load_ib_outlets_from_swift_source():
 			allIBOutlets = re.findall('\\s@IBOutlet.*.var\\s(.*):', fileContents)
 			parentClasses = re.findall(source_file_name + ':.(.*.){', fileContents)
 
-			source_to_ib_outlet_mapping[source_file_name] = allIBOutlets
+			source_to_ib_outlet_mapping[source_file_name] = set(allIBOutlets)
 
 			# Create a relationship between all of the base and derived classes as this may be needed later on
 			if parentClasses:
@@ -73,17 +73,20 @@ def load_ib_outlets_from_swift_source():
 
 	return source_to_ib_outlet_mapping, subclass_to_parent_mapping
 
-def find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_parent_mapping):
+def find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_parent_mapping, current_child_view_controller):
 	parents_ib_outlets = []
 
-	# Adds the parents IBOutlet's to the child's IBOutlet
-	for child, parent_classes in subclass_to_parent_mapping.items():		
+	parent_classes = subclass_to_parent_mapping[current_child_view_controller]
 
-		for potential_parent in parent_classes:
-			if potential_parent in swift_source_ib_outlet_map:
-				parents_ib_outlets += swift_source_ib_outlet_map[potential_parent]
+	for potential_parent in parent_classes:
+		print("Parent: " + potential_parent)
 		
-	return parents_ib_outlets
+		if potential_parent in swift_source_ib_outlet_map:
+			print("Adding: " + str(swift_source_ib_outlet_map[potential_parent]))
+			parents_ib_outlets += swift_source_ib_outlet_map[potential_parent]
+	
+	print("Output: " + str(set(parents_ib_outlets)))
+	return set(parents_ib_outlets)
 
 logger.info("Processing storyboard files")
 storyboard_ib_outlet_map = load_ib_outlets_from_storyboards()
@@ -98,36 +101,36 @@ for key, value in storyboard_ib_outlet_map.items():
 
 	logger.info("Processing " + key + "...")
 
-	if key in swift_source_ib_outlet_map:		
-		print("IBOutlets: " + str(set(value)))
-		print("Code References: " + str(set(swift_source_ib_outlet_map[key])))
+	if key in swift_source_ib_outlet_map:				
+		outlets_defined_in_parent_class = set(find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_parent_mapping, key))
 
-		# HostCleaningChecklistViewController 
-		result = set(value).difference(set(swift_source_ib_outlet_map[key])) 
-		print(str(result))
+		# TEMPORARY!!
+		parent_classes = subclass_to_parent_mapping[key]
 
-		if result:
-			logger.warning("Found some missing properties. Checking for declaration in parent class.")
-		
-			# print('The missing properties may be in the parent class: ' + str(subclass_to_parent_mapping[key]))
-			# print("Checking parent classes for IBOutlet / IBAction declarations:")
-			# print("Currently missing: " + str(remaining_ib_outlets))
+		outlets_defined_in_code = swift_source_ib_outlet_map[key]
+		outlets_from_storyboard = value
 
-			parents_ib_outlets = find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_parent_mapping)
-			print("parents_ib_outlets: " + str(parents_ib_outlets))
-			remaining_ib_outlets = result - set(parents_ib_outlets)
+		result = set()
 
-			if remaining_ib_outlets:
+		if len(outlets_defined_in_code) >= len(outlets_from_storyboard):
+			result = outlets_defined_in_code - outlets_from_storyboard
+		else:
+			result = outlets_from_storyboard - outlets_defined_in_code
+
+		if len(result) > 0:		
+				
+			print(parent_classes)
+			if "UITableViewDataSource" in parent_classes or "UITableViewDelegate" in parent_classes:
+				logger.warning("Failure [but on view with cell]: " + str(result))
+			else:				
 				failures += 1
-				logger.critical("Could not find the following connections: " + str(remaining_ib_outlets))
-			else:
-				logger.info("All IBOutlet references found.")
-			
+				logger.critical("Failure: " + str(result))
 
 if failures == 0:
 	logger.debug("No dangling IBOutlet references found.")
 else:
 	logger.critical("Dangling IBOutlet references were found - please see logs.")
+	logger.critical("Failure Count: " + str(failures))
 
 
 # Edge Cases
@@ -136,6 +139,5 @@ else:
 
 # Fails on:
 # Prototype cells
-# Subclasses - if one VC is a subclass of another VC, just add the parent VCs outlets to this one
 
 # TODO: .xib & IBActions
