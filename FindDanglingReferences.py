@@ -23,14 +23,13 @@ def extract_ib_outlets_from_table_view_cell(view_controller):
 	table_view_cell_to_ib_outlet_map = {}
 
 	for table_view_cell in table_view_cells:
-		table_view_cells_connections = table_view_cell.findall('.//connections/*')
+		table_view_cells_connections = table_view_cell.findall('./connections/')
 
 		ib_outlets = [connection.attrib["property"] for connection in table_view_cells_connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
 
 		if "customClass" in table_view_cell.attrib:
-			# Handles a UITableViewCell containing a collection view inside of it
-			# ib_outlets += extract_ib_outlets_from_table_view_cell(table_view_cell).update(extract_ib_outlets_from_collection_view_cell(table_view_cell))
-			# extract_ib_outlets_from_collection_view_cell(table_view_cell)
+			print("Processing.." + table_view_cell.attrib["customClass"] + "with parent VC: " + view_controller.attrib["customClass"])
+
 			table_view_cell_to_ib_outlet_map[table_view_cell.attrib["customClass"]] = set(ib_outlets)
 	return table_view_cell_to_ib_outlet_map
 
@@ -39,11 +38,13 @@ def extract_ib_outlets_from_collection_view_cell(view_controller):
 	collection_view_cell_to_ib_outlet_map = {}
 
 	for collection_view_cell in collection_view_cells:
-		collection_view_cells_connections = collection_view_cell.findall('.//connections/*')
+		collection_view_cells_connections = collection_view_cell.findall('./connections/')
 
 		ib_outlets = [connection.attrib["property"] for connection in collection_view_cells_connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
 
-		if "customClass" in collection_view_cell.attrib:							
+		if "customClass" in collection_view_cell.attrib:
+			print("Processing.." + collection_view_cell.attrib["customClass"] + "with parent VC: " + view_controller.attrib["customClass"])
+
 			collection_view_cell_to_ib_outlet_map[collection_view_cell.attrib["customClass"]] = set(ib_outlets)
 	return collection_view_cell_to_ib_outlet_map
 
@@ -121,6 +122,7 @@ def find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_pare
 	return set(parents_ib_outlets)
 
 def validate_ib_outlet_connections(ib_outlet_map):	
+	failures = 0
 	for key, value in ib_outlet_map.items():
 		logger.info("Processing " + key + "...")
 
@@ -149,10 +151,13 @@ def validate_ib_outlet_connections(ib_outlet_map):
 			# which would imply an error
 			# 
 			# TLDR: Checking if the child is inheriting the unaccounted for IBOutlets from it's parent. Otherwise, we've found a real error.
-			if len(result) > 0 and not result.issubset(outlets_defined_in_parent_class):		
+			if len(result) > 0 and not result.issubset(outlets_defined_in_parent_class):
+				failures += 1		
 				logger.critical("Failure: " + str(result))
 		else:
 			logger.warning("Key not found in mapping. Assuming ObjC file or error.")
+
+	print("Failures: " + str(failures))
 
 view_controllers_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map = load_ib_outlets_from_storyboards()
 swift_source_ib_outlet_map, subclass_to_parent_mapping = load_ib_outlets_from_swift_source()
