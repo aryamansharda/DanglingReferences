@@ -140,8 +140,15 @@ def validate_ib_outlet_connections(ib_outlet_map):
 				if len(result) >= len(outlets_defined_in_parent_class):
 					result = result - outlets_defined_in_parent_class
 				else:
+					# The parent can always contain additional 
 					result = outlets_defined_in_parent_class - result
-
+			
+			# At this point there are some remaining unaccounted for IBOutlets
+			# Either these all exist in the parent class and the child class is only making a few of the connections and inheritint the rest
+			# or the child class contains an extra IBOutlet reference that isn't inherited or has parity between the code and the storyboard
+			# which would imply an error
+			# 
+			# TLDR: Checking if the child is inheriting the unaccounted for IBOutlets from it's parent. Otherwise, we've found a real error.
 			if len(result) > 0 and not result.issubset(outlets_defined_in_parent_class):		
 				logger.critical("Failure: " + str(result))
 		else:
