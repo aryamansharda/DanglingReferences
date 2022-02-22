@@ -18,9 +18,36 @@ def findAllFilesWithExtension(path, extension):
 	            files.append(os.path.join(r, file))
 	return files
 
+def extract_ib_outlets_from_table_view_cell(view_controller):
+	table_view_cells = view_controller.findall('.//tableViewCell')
+	table_view_cell_to_ib_outlet_map = {}
+
+	for table_view_cell in table_view_cells:
+		table_view_cells_connections = table_view_cell.findall('.//connections/*')
+
+		ib_outlets = [connection.attrib["property"] for connection in table_view_cells_connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
+
+		if "customClass" in table_view_cell.attrib:							
+			table_view_cell_to_ib_outlet_map[table_view_cell.attrib["customClass"]] = ib_outlets
+	return table_view_cell_to_ib_outlet_map
+
+def extract_ib_outlets_from_collection_view_cell(view_controller):
+	collection_view_cells = view_controller.findall('.//collectionViewCell')
+	collection_view_cell_to_ib_outlet_map = {}
+
+	for collection_view_cell in collection_view_cells:
+		collection_view_cells_connections = collection_view_cell.findall('.//connections/*')
+
+		ib_outlets = [connection.attrib["property"] for connection in collection_view_cells_connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
+
+		if "customClass" in collection_view_cell.attrib:							
+			collection_view_cell_to_ib_outlet_map[collection_view_cell.attrib["customClass"]] = ib_outlets
+	return collection_view_cell_to_ib_outlet_map
 
 def load_ib_outlets_from_storyboards():
-	storyboard_ib_outlet_map = {}
+	storyboard_ib_outlet_map = {}	
+	table_view_cell_to_ib_outlet_map = {}
+	collection_view_cell_to_ib_outlet_map = {}
 
 	# Split into .storyboard and .swift files
 	storyboards = findAllFilesWithExtension("/Users/aryamansharda/Documents/bowman/Bowman", ".storyboard")
@@ -32,25 +59,28 @@ def load_ib_outlets_from_storyboards():
 		viewControllers = root.findall('.//viewController')
 		for viewController in viewControllers:
 			# TODO: Handle rootViewControllers -> ModifyTrip -> New charges
+			# If there is no customClass provided, then there can't be a ViewController hence no IBOutlets to check for
 			if "customClass" in viewController.attrib:
 				view_controller_class_name = viewController.attrib["customClass"]
+				# print(view_controller_class_name)
 
-				connections = viewController.findall('.//connections/*')
-				ib_outlets = [connection.attrib["property"] for connection in connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
+				# Mapping the view controller's custom class name to just the IBOutlets declared on the storyboard representation of the view controller
+				connections = viewController.findall('./connections/')
+				view_controllers_ib_outlets = [connection.attrib["property"] for connection in connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
+				storyboard_ib_outlet_map[view_controller_class_name] = set(view_controllers_ib_outlets)
 
-				storyboard_ib_outlet_map[view_controller_class_name] = set(ib_outlets)
-			
+				# Collect all of the cells identified on this page. We'll need to validate them later
+				table_view_cell_to_ib_outlet_map = extract_ib_outlets_from_table_view_cell(viewController)
+				collection_view_cell_to_ib_outlet_map = extract_ib_outlets_from_collection_view_cell(viewController)
+							
 			# 	# TODO: See if there are any other types besides selector
 			# 	print("IBAction found: " + connection.attrib["selector"])
-	return storyboard_ib_outlet_map
+	
+	return storyboard_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map
 
 def load_ib_outlets_from_swift_source():
 	# Find a matching .swift file and extract the IBOutlets
 	swiftSourceFiles = findAllFilesWithExtension("/Users/aryamansharda/Documents/bowman/Bowman", ".swift")
-
-	# Only process ViewController Swift files
-	# TODO: I don't think is necessary if we're going to handle cells too
-	# swiftSourceFiles = [source for source in swiftSourceFiles if "ViewController.swift" in source]
 
 	source_to_ib_outlet_mapping = {}
 	subclass_to_parent_mapping = {}
@@ -58,10 +88,10 @@ def load_ib_outlets_from_swift_source():
 	for source in swiftSourceFiles:
 		# Retrieves just the view controller's name
 		source_file_name = Path(source).stem
-
 		with open(source, 'r') as file:
 
 			fileContents = file.read()			
+
 			allIBOutlets = re.findall('\\s@IBOutlet.*.var\\s(.*):', fileContents)
 			parentClasses = re.findall(source_file_name + ':.(.*.){', fileContents)
 
@@ -75,12 +105,14 @@ def load_ib_outlets_from_swift_source():
 
 def find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_parent_mapping, current_child_view_controller):
 	parents_ib_outlets = []
-
 	parent_classes = subclass_to_parent_mapping[current_child_view_controller]
 
 	for potential_parent in parent_classes:
 		print("Parent: " + potential_parent)
-		
+
+		# TODO: Fix regex instead
+		potential_parent = potential_parent.strip()
+
 		if potential_parent in swift_source_ib_outlet_map:
 			print("Adding: " + str(swift_source_ib_outlet_map[potential_parent]))
 			parents_ib_outlets += swift_source_ib_outlet_map[potential_parent]
@@ -88,10 +120,7 @@ def find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_pare
 	print("Output: " + str(set(parents_ib_outlets)))
 	return set(parents_ib_outlets)
 
-logger.info("Processing storyboard files")
-storyboard_ib_outlet_map = load_ib_outlets_from_storyboards()
-
-logger.info("Processing .swift files")
+storyboard_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map = load_ib_outlets_from_storyboards()
 swift_source_ib_outlet_map, subclass_to_parent_mapping = load_ib_outlets_from_swift_source()
 
 failures = 0
@@ -103,10 +132,6 @@ for key, value in storyboard_ib_outlet_map.items():
 
 	if key in swift_source_ib_outlet_map:				
 		outlets_defined_in_parent_class = set(find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_parent_mapping, key))
-
-		# TEMPORARY!!
-		parent_classes = subclass_to_parent_mapping[key]
-
 		outlets_defined_in_code = swift_source_ib_outlet_map[key]
 		outlets_from_storyboard = value
 
@@ -117,14 +142,22 @@ for key, value in storyboard_ib_outlet_map.items():
 		else:
 			result = outlets_from_storyboard - outlets_defined_in_code
 
+		# Check if the remaining unaccounted for IBOutlets are declared in the parent clas		
+		if len(result) > 0:
+			print("Need to check parents")
+			print(result)
+			print(outlets_defined_in_parent_class)
+			if len(result) >= len(outlets_defined_in_parent_class):
+				result = result - outlets_defined_in_parent_class
+			else:
+				result = outlets_defined_in_parent_class - result
+
 		if len(result) > 0:		
-				
-			print(parent_classes)
-			if "UITableViewDataSource" in parent_classes or "UITableViewDelegate" in parent_classes:
-				logger.warning("Failure [but on view with cell]: " + str(result))
-			else:				
-				failures += 1
-				logger.critical("Failure: " + str(result))
+			failures += 1
+			logger.critical("Failure: " + str(result))
+
+# TODO Validate Table View Cells
+# TODO Validate Collection View Cells
 
 if failures == 0:
 	logger.debug("No dangling IBOutlet references found.")
@@ -132,6 +165,8 @@ else:
 	logger.critical("Dangling IBOutlet references were found - please see logs.")
 	logger.critical("Failure Count: " + str(failures))
 
+# Currently things are failing on cells as expected and on table views because it can't resolve the data source and delegate properties. 
+# You'll need to change your XML approach and handle these accordingly
 
 # Edge Cases
 # 2 Swift VCs with the same name, but different file paths - this is because I'm just saving the last part of the filepath for the Swift extension
@@ -141,3 +176,4 @@ else:
 # Prototype cells
 
 # TODO: .xib & IBActions
+
