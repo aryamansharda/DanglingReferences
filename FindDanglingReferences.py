@@ -28,8 +28,6 @@ def extract_ib_outlets_from_table_view_cell(view_controller):
 		ib_outlets = [connection.attrib["property"] for connection in table_view_cells_connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
 
 		if "customClass" in table_view_cell.attrib:
-			print("Processing.." + table_view_cell.attrib["customClass"] + "with parent VC: " + view_controller.attrib["customClass"])
-
 			table_view_cell_to_ib_outlet_map[table_view_cell.attrib["customClass"]] = set(ib_outlets)
 	return table_view_cell_to_ib_outlet_map
 
@@ -43,8 +41,6 @@ def extract_ib_outlets_from_collection_view_cell(view_controller):
 		ib_outlets = [connection.attrib["property"] for connection in collection_view_cells_connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
 
 		if "customClass" in collection_view_cell.attrib:
-			print("Processing.." + collection_view_cell.attrib["customClass"] + "with parent VC: " + view_controller.attrib["customClass"])
-
 			collection_view_cell_to_ib_outlet_map[collection_view_cell.attrib["customClass"]] = set(ib_outlets)
 	return collection_view_cell_to_ib_outlet_map
 
@@ -52,9 +48,32 @@ def load_ib_outlets_from_storyboards():
 	storyboard_ib_outlet_map = {}	
 	table_view_cell_to_ib_outlet_map = {}
 	collection_view_cell_to_ib_outlet_map = {}
+	xib_to_ib_outlet_map = {}
 
 	# Split into .storyboard and .swift files
 	storyboards = findAllFilesWithExtension("/Users/aryamansharda/Documents/bowman/Bowman", ".storyboard")
+	xibs = findAllFilesWithExtension("/Users/aryamansharda/Documents/bowman/Bowman", ".xib")
+
+	for xib in xibs:
+		print("XIB: " + xib)
+		tree = ET.parse(xib)
+		root = tree.getroot()
+
+		files_owner = root.findall('.//placeholder')
+		for file_owner in files_owner:
+			print(file_owner.attrib)
+			if "customClass" in file_owner.attrib:
+				custom_xib_class_name = file_owner.attrib["customClass"]
+				print(custom_xib_class_name)
+
+				connections = file_owner.findall('./connections/')
+				xib_ib_outlets = [connection.attrib["property"] for connection in connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
+				print(xib_ib_outlets)
+				xib_to_ib_outlet_map[custom_xib_class_name] = set(xib_ib_outlets)
+
+				table_view_cell_to_ib_outlet_map.update(extract_ib_outlets_from_table_view_cell(root))
+				collection_view_cell_to_ib_outlet_map.update(extract_ib_outlets_from_collection_view_cell(root))
+
 
 	for storyboard in storyboards:
 		tree = ET.parse(storyboard)
@@ -62,13 +81,10 @@ def load_ib_outlets_from_storyboards():
 
 		viewControllers = root.findall('.//viewController')
 		for viewController in viewControllers:
-
 			# If there is no customClass provided, then there can't be a ViewController hence no IBOutlets to check for
 			if "customClass" in viewController.attrib:
 				view_controller_class_name = viewController.attrib["customClass"]
-				# print(view_controller_class_name)
-
-				# Mapping the view controller's custom class name to just the IBOutlets declared on the storyboard representation of the view controller
+				
 				connections = viewController.findall('./connections/')
 				view_controllers_ib_outlets = [connection.attrib["property"] for connection in connections if connection.tag == "outlet" or connection.tag == "outletCollection"]
 				storyboard_ib_outlet_map[view_controller_class_name] = set(view_controllers_ib_outlets)
@@ -76,12 +92,8 @@ def load_ib_outlets_from_storyboards():
 				# Collect all of the cells identified on this page. We'll need to validate them later
 				table_view_cell_to_ib_outlet_map.update(extract_ib_outlets_from_table_view_cell(viewController))
 				collection_view_cell_to_ib_outlet_map.update(extract_ib_outlets_from_collection_view_cell(viewController))
-							
-			# 	# TODO: See if there are any other types besides selector
-			# 	print("IBAction found: " + connection.attrib["selector"])
-	
-	return storyboard_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map
-
+										
+	return storyboard_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map, xib_to_ib_outlet_map
 
 def load_ib_outlets_from_swift_source():
 	# Find a matching .swift file and extract the IBOutlets
@@ -159,29 +171,10 @@ def validate_ib_outlet_connections(ib_outlet_map):
 
 	print("Failures: " + str(failures))
 
-view_controllers_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map = load_ib_outlets_from_storyboards()
+view_controllers_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map, xib_to_ib_outlet_map = load_ib_outlets_from_storyboards()
 swift_source_ib_outlet_map, subclass_to_parent_mapping = load_ib_outlets_from_swift_source()
 
-validate_ib_outlet_connections(view_controllers_ib_outlet_map)
+# validate_ib_outlet_connections(view_controllers_ib_outlet_map)
 validate_ib_outlet_connections(table_view_cell_to_ib_outlet_map)
-validate_ib_outlet_connections(collection_view_cell_to_ib_outlet_map)
-
-# Remember this is an issue because there is a discrepancy allowed between parent and child - think about what it is
-# 2022-02-21 18:22:32 Aryamans-MacBook-Pro.local __main__[95788] CRITICAL Failure: {'imageView', 'fauxTitleLabel'}
-# 2022-02-21 18:22:32 Aryamans-MacBook-Pro.local __main__[95788] INFO Processing RulesOfTheRoadInformationalViewController...
-
-# Need to update the regex to look for a ! at the end of the IBOutlet declaraiton, if it's a ? not my problem to handle
-
-# Table View currently fails if the cell has a collection or table view inside of it
-
-# If your Swift class inherits from an ObjC class (which will be fixed) Mitek -> This will be fixed by adding ObjC Support
-# If your Swift class inherits IBOutlets from a VC defined in a framework which we don't have the source control for
-
-# TODOS
-# Handle .xib
-# Handle IBActions
-
-# Edge Cases
-# 2 Swift VCs with the same name, but different file paths - this is because I'm just saving the last part of the filepath for the Swift extension
-# 2 VCs declared in the same file because we use the filename only so the other VC would be hidden away
-
+# validate_ib_outlet_connections(collection_view_cell_to_ib_outlet_map)
+validate_ib_outlet_connections(xib_to_ib_outlet_map)
