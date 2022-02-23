@@ -81,7 +81,7 @@ def load_ib_outlets_from_objective_c_source():
 	for source in objc_files:
 		# Retrieves just the view controller's name
 		source_file_name = Path(source).stem
-		# print(source_file_name)
+		print(source_file_name)
 
 		with open(source, 'r') as file:
 
@@ -89,6 +89,7 @@ def load_ib_outlets_from_objective_c_source():
 				fileContents = file.read()			
 
 				allIBOutlets = re.findall('\\sIBOutlet.*\\*\\s*(.*);', fileContents)
+				# print("IBOutlets: ")
 				# print(allIBOutlets)
 					
 				if source_file_name in source_to_ib_outlet_mapping:
@@ -103,12 +104,12 @@ def load_ib_outlets_from_objective_c_source():
 				if ".h" in source:
 					parentClasses = re.findall('@interface\\s+\\w+\\s+:\\s+(\\w+)', fileContents)
 
-					print("Finding parents")			
-					print(parentClasses)
+					# print("Finding parents")			
+					# print(parentClasses)
 					
 					if parentClasses:
-						subclass_to_parent_mapping[source_file_name] = parentClasses[0].split(' ')[-1]
-						# print("Parents: " + str(parentClasses[0].split(' ')[-1]))
+						subclass_to_parent_mapping[source_file_name] = parentClasses[0]
+						# print("Parents: " + str(parentClasses[0]))
 			except:
 				print("Failed to process file: " + source_file_name)
 
@@ -127,34 +128,35 @@ def load_ib_outlets_from_swift_source():
 		with open(source, 'r') as file:
 
 			fileContents = file.read()
-			print(source_file_name)
+			# print(source_file_name)
 
 			# Gets all IBOutlets with optionality \\s@IBOutlet.*.var\\s(.*):.*!
 			allIBOutlets = re.findall('\\s@IBOutlet.*.var\\s(.*):', fileContents)
-			print(allIBOutlets)
-			parentClasses = re.findall(source_file_name + ':.(.*.){', fileContents)
+			# print(allIBOutlets)
+			parentClasses = re.findall(source_file_name + ':\\s+(\\w+)', fileContents)
+			# print(parentClasses)
 
 			source_to_ib_outlet_mapping[source_file_name] = set(allIBOutlets)
 
 			# Create a relationship between all of the base and derived classes as this may be needed later on
 			if parentClasses:
-				swift_subclass_to_parent_mapping[source_file_name] = parentClasses[0].split(',')
+				# TODO: Clean up this nonsense
+				# print("Swift: setting parent " + str(parentClasses[0].split(',')[0]) + "for class " + source_file_name)
+				swift_subclass_to_parent_mapping[source_file_name] = parentClasses[0].split(',')[0]
 
 	return source_to_ib_outlet_mapping, swift_subclass_to_parent_mapping
 
-def find_ib_outlets_in_parent_class(swift_source_ib_outlet_map, subclass_to_parent_mapping, current_child_view_controller):
+def find_ib_outlets_in_parent_class(all_ib_outlet_map, subclass_to_parent_mapping, current_child_view_controller):
 	parents_ib_outlets = []
 
 	try:
 		parent_classes = subclass_to_parent_mapping[current_child_view_controller]
 
-		for potential_parent in parent_classes:
-			potential_parent = potential_parent.strip()
-
-			if potential_parent in swift_source_ib_outlet_map:
-				parents_ib_outlets += swift_source_ib_outlet_map[potential_parent]
+		if parent_classes in all_ib_outlet_map:
+			parents_ib_outlets += all_ib_outlet_map[parent_classes]
 	except:
-		print("")
+		# TODO: Remove
+		noop = True
 		# Key error on: " + current_child_view_controller)
 	
 	return set(parents_ib_outlets)
@@ -186,6 +188,9 @@ def validate_ib_outlet_connections(ib_outlet_map):
 					# The parent can always contain additional 
 					result = outlets_defined_in_parent_class - result
 			
+			# print("Checking for " + str(result) + " in parents")
+			# print("Retrieved parent IBOutlets: " + str(outlets_defined_in_parent_class))
+
 			# At this point there are some remaining unaccounted for IBOutlets
 			# Either these all exist in the parent class and the child class is only making a few of the connections and inheritint the rest
 			# or the child class contains an extra IBOutlet reference that isn't inherited or has parity between the code and the storyboard
@@ -204,8 +209,8 @@ objc_source_ib_outlet_map, objc_subclass_to_parent_mapping = load_ib_outlets_fro
 view_controllers_ib_outlet_map, table_view_cell_to_ib_outlet_map, collection_view_cell_to_ib_outlet_map = load_ib_outlets_from_storyboards()
 swift_source_ib_outlet_map, swift_subclass_to_parent_mapping = load_ib_outlets_from_swift_source()
 
-print("Output:")
-print(swift_source_ib_outlet_map)
+# print("Output:")
+# print(swift_source_ib_outlet_map)
 
 # Combine ObjC & Swift child parent relationships into one dictionary
 subclass_to_parent_mapping = {}
